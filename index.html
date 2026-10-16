@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OBS Interactive Wheel & Picker Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Twitch TMI.js library for native chat integration -->
+  <script src="https://cdn.jsdelivr.net/npm/tmi.js@1.8.5/12/tmi.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800;900&family=Rubik:ital,wght@0,700;0,900;1,900&display=swap" rel="stylesheet" />
+  
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      overflow-x: hidden;
+    }
+    
+    .font-heading {
+      font-family: 'Rubik', sans-serif;
+    }
+
+    /* Transparent background mode when running in OBS Browser Source */
+    body.obs-mode {
+      background: transparent !important;
+      overflow: hidden;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+
+    /* Glow Effects */
+    .glow-purple {
+      box-shadow: 0 0 25px rgba(168, 85, 247, 0.4);
+    }
+    .glow-gold {
+      box-shadow: 0 0 35px rgba(234, 179, 8, 0.6);
+    }
+
+    /* Confetti Canvas overlay */
+    #confettiCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    /* Pulse animation for winner banner */
+    @keyframes winnerPulse {
+      0%, 100% { transform: scale(1); filter: drop-shadow(0 0 15px rgba(234,179,8,0.8)); }
+      50% { transform: scale(1.05); filter: drop-shadow(0 0 30px rgba(234,179,8,1)); }
+    }
+    .animate-winner {
+      animation: winnerPulse 1.2s infinite ease-in-out;
+    }
+
+    /* Pointer Tick Bounce */
+    @keyframes tickBounce {
+      0% { transform: rotate(0deg); }
+      30% { transform: rotate(-22deg); }
+      100% { transform: rotate(0deg); }
+    }
+    .ticking {
+      animation: tickBounce 0.12s ease-out;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-purple-500 selection:text-white">
+
+  <!-- Confetti Layer -->
+  <canvas id="confettiCanvas"></canvas>
+
+  <header id="mainHeader" class="bg-slate-900/90 backdrop-blur border-b border-slate-800 sticky top-0 z-40 px-4 py-3 transition-all">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="bg-gradient-to-tr from-purple-600 to-pink-500 p-2.5 rounded-xl text-white shadow-lg shadow-purple-500/30">
+          <i class="fa-solid fa-dharmachakra text-2xl animate-spin-slow"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-900 tracking-wide font-heading bg-gradient-to-r from-purple-400 via-pink-400 to-amber-300 bg-clip-text text-transparent">
+            OBS STREAM WHEEL
+          </h1>
+          <p class="text-xs text-slate-400 font-medium">Customizable Interactive Decision & Winner Picker</p>
+        </div>
+      </div>
+
+      <!-- Quick Actions / Mode Toggles -->
+      <div class="flex items-center space-x-2">
+        <button id="toggleObsModeBtn" onclick="toggleOBSMode()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition">
+          <i class="fa-solid fa-camera"></i>
+          <span id="obsModeText">OBS Overlay Mode</span>
+        </button>
+        <button onclick="openLinkModal()" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-purple-600/30 transition">
+          <i class="fa-solid fa-link"></i>
+          <span>Get OBS Link</span>
+        </button>
+        <button onclick="toggleAudio()" id="audioToggleBtn" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold">
+          <i id="audioIcon" class="fa-solid fa-volume-high text-emerald-400"></i>
+        </button>
+        <button onclick="switchTab('twitch')" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold relative" title="Twitch Settings">
+          <i class="fa-brands fa-twitch text-purple-400"></i>
+          <span id="twitchBadge" class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-slate-900"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    
+    <!-- LEFT: Interactive Canvas Wheel -->
+    <section class="lg:col-span-7 flex flex-col items-center justify-center relative min-h-[480px]">
+      <div id="wheelWrapper" class="relative flex items-center justify-center p-4">
+        
+        <!-- Glowing outer frame -->
+        <div id="wheelGlowRing" class="absolute rounded-full border-4 border-purple-500/40 glow-purple transition-all duration-500"></div>
+
+        <!-- Wheel Canvas -->
+        <canvas id="wheelCanvas" width="460" height="460" class="max-w-full h-auto z-10 transition-transform duration-75"></canvas>
+
+        <!-- Top Arrow Indicator -->
+        <div id="pointerArrow" class="absolute top-0 z-20 transform -translate-y-2 text-amber-400 drop-shadow-[0_4px_10px_rgba(0,0,0,0.8)]">
+          <i class="fa-solid fa-caret-down text-4xl"></i>
+        </div>
+
+        <!-- Center Spin Button Overlay -->
+        <button id="centerSpinBtn" onclick="spinWheel()" class="absolute z-30 w-20 h-20 bg-slate-900 border-4 border-amber-400 rounded-full flex flex-col items-center justify-center text-amber-400 hover:text-amber-300 hover:scale-105 active:scale-95 shadow-2xl transition duration-150">
+          <i class="fa-solid fa-play text-xl ml-0.5"></i>
+          <span class="text-[10px] font-900 tracking-wider font-heading uppercase mt-0.5">SPIN</span>
+        </button>
+      </div>
+
+      <!-- Live Spin Info Panel below wheel -->
+      <div id="wheelControlsBar" class="mt-4 w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-2xl p-3 flex items-center justify-between shadow-lg transition-all duration-300">
+        <div id="embeddedWinnerBox" class="flex-grow text-center">
+          <p class="text-xs text-slate-400 font-medium">Ready to spin!</p>
+        </div>
+        <button onclick="resetWheel()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1 transition">
+          <i class="fa-solid fa-rotate-left"></i>
+          <span>Reset</span>
+        </button>
+      </div>
+    </section>
+
+    <section id="configPanelSection" class="lg:col-span-5 bg-slate-900/90 border border-slate-800 rounded-2xl flex flex-col h-[580px] shadow-xl overflow-hidden">
+      
+      <!-- Tab Controls -->
+      <div class="flex border-b border-slate-800 bg-slate-950/60 text-xs font-bold uppercase tracking-wider text-slate-400">
+        <button onclick="switchTab('items')" id="tabBtn-items" class="flex-1 py-3 px-2 border-b-2 border-purple-500 text-purple-400 flex items-center justify-center gap-1.5 transition">
+          <i class="fa-solid fa-list-check"></i> Segments
+        </button>
+        <button onclick="switchTab('twitch')" id="tabBtn-twitch" class="flex-1 py-3 px-2 border-b-2 border-transparent hover:text-slate-200 flex items-center justify-center gap-1.5 transition">
+          <i class="fa-brands fa-twitch"></i> Twitch !spin
+        </button>
+        <button onclick="switchTab('presets')" id="tabBtn-presets" class="flex-1 py-3 px-2 border-b-2 border-transparent hover:text-slate-200 flex items-center justify-center gap-1.5 transition">
+          <i class="fa-solid fa-wand-magic-sparkles"></i> Presets
+        </button>
+        <button onclick="switchTab('history')" id="tabBtn-history" class="flex-1 py-3 px-2 border-b-2 border-transparent hover:text-slate-200 flex items-center justify-center gap-1.5 transition">
+          <i class="fa-solid fa-clock-rotate-left"></i> Log
+        </button>
+        <button onclick="switchTab('style')" id="tabBtn-style" class="flex-1 py-3 px-2 border-b-2 border-transparent hover:text-slate-200 flex items-center justify-center gap-1.5 transition">
+          <i class="fa-solid fa-palette"></i> Style
+        </button>
+      </div>
+
+      <!-- Tab Content: Items / Segments -->
+      <div id="tabContent-items" class="flex-grow p-4 flex flex-col overflow-hidden">
+        <form onsubmit="handleAddItem(event)" class="flex gap-2 mb-3">
+          <input type="text" id="newItemInput" placeholder="Add custom item..." class="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500">
+          <button type="submit" class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 transition">
+            <i class="fa-solid fa-plus"></i> Add
+          </button>
+        </form>
+
+        <div class="flex justify-between items-center text-xs text-slate-400 mb-2 px-1">
+          <span id="segmentCountText">0 Segments</span>
+          <div class="flex gap-2">
+            <button onclick="shuffleSegments()" class="hover:text-purple-400 transition" title="Shuffle Items"><i class="fa-solid fa-shuffle"></i> Shuffle</button>
+            <button onclick="clearAllItems()" class="hover:text-rose-400 transition" title="Clear All"><i class="fa-solid fa-trash-can"></i> Clear</button>
+          </div>
+        </div>
+
+        <div id="itemsListContainer" class="flex-grow overflow-y-auto space-y-2 pr-1"></div>
+      </div>
+
+      <!-- Tab Content: Twitch Integration -->
+      <div id="tabContent-twitch" class="hidden flex-grow p-4 overflow-y-auto space-y-4 text-xs">
+        <div class="p-3 bg-purple-950/40 border border-purple-800/60 rounded-xl">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2 font-bold text-slate-200">
+              <i class="fa-brands fa-twitch text-purple-400 text-base"></i>
+              <span>Twitch Chat Trigger</span>
+            </div>
+            <span id="twitchStatusText" class="text-[10px] bg-rose-950 text-rose-300 px-2 py-0.5 rounded border border-rose-800">Disconnected</span>
+          </div>
+          <p class="text-slate-400 text-[11px]">Connect your channel so viewers can trigger wheel spins live using <code class="bg-slate-900 text-purple-300 px-1 py-0.5 rounded">!spin</code> in chat.</p>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-bold mb-1">Twitch Channel Name</label>
+          <div class="flex gap-2">
+            <input type="text" id="twitchChannelInput" placeholder="e.g. shroud" class="flex-grow bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500">
+            <button id="connectTwitchBtn" onclick="toggleTwitchConnect()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded-xl transition flex items-center gap-1">
+              Connect
+            </button>
+          </div>
+        </div>
+
+        <div class="border-t border-slate-800 pt-3 space-y-3">
+          <div>
+            <label class="block text-slate-300 font-bold mb-1">Chat Command</label>
+            <input type="text" id="chatCommandInput" value="!spin" onchange="updateTwitchConfig()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-purple-500">
+          </div>
+
+          <div>
+            <label class="block text-slate-300 font-bold mb-1">Who Can Trigger</label>
+            <select id="twitchPermsSelect" onchange="updateTwitchConfig()" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-slate-200 font-semibold focus:outline-none focus:border-purple-500">
+              <option value="everyone">Everyone (All Viewers)</option>
+              <option value="subs">Subscribers, VIPs & Mods</option>
+              <option value="mods">Broadcaster & Mods Only</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-slate-300 font-bold mb-1">Command Cooldown (<span id="cooldownVal">10</span>s)</label>
+            <input type="range" id="cooldownRange" min="0" max="60" step="5" value="10" oninput="document.getElementById('cooldownVal').innerText = this.value; updateTwitchConfig()" class="w-full accent-purple-500">
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Presets -->
+      <div id="tabContent-presets" class="hidden flex-grow p-4 overflow-y-auto space-y-3 text-xs">
+        <p class="text-slate-400">Select a pre-made preset to quickly fill the wheel:</p>
+        
+        <button onclick="loadPreset('games')" class="w-full p-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 flex items-center justify-between text-left transition">
+          <div>
+            <span class="font-bold text-purple-400 block">🎮 What to Play Next</span>
+            <span class="text-[11px] text-slate-400">Popular competitive games and shooters</span>
+          </div>
+          <i class="fa-solid fa-chevron-right text-slate-600"></i>
+        </button>
+
+        <button onclick="loadPreset('subgoals')" class="w-full p-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 flex items-center justify-between text-left transition">
+          <div>
+            <span class="font-bold text-amber-400 block">⭐ Sub Goal Rewards</span>
+            <span class="text-[11px] text-slate-400">Streamer punishments and fun rewards</span>
+          </div>
+          <i class="fa-solid fa-chevron-right text-slate-600"></i>
+        </button>
+
+        <button onclick="loadPreset('challenges')" class="w-full p-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 flex items-center justify-between text-left transition">
+          <div>
+            <span class="font-bold text-emerald-400 block">🔥 In-Game Challenges</span>
+            <span class="text-[11px] text-slate-400">Pistol only, inverted controls, no healing</span>
+          </div>
+          <i class="fa-solid fa-chevron-right text-slate-600"></i>
+        </button>
+
+        <button onclick="loadPreset('giveaway')" class="w-full p-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 flex items-center justify-between text-left transition">
+          <div>
+            <span class="font-bold text-pink-400 block">🎁 Viewer Giveaway Picker</span>
+            <span class="text-[11px] text-slate-400">Sample viewer names list</span>
+          </div>
+          <i class="fa-solid fa-chevron-right text-slate-600"></i>
+        </button>
+      </div>
+
+      <!-- Tab Content: Spin History -->
+      <div id="tabContent-history" class="hidden flex-grow p-4 flex flex-col overflow-hidden">
+        <div class="flex justify-between items-center text-xs text-slate-400 mb-2">
+          <span>Winner Log</span>
+          <button onclick="clearHistory()" class="hover:text-rose-400 text-[11px] transition">Clear Log</button>
+        </div>
+        <div id="historyList" class="flex-grow overflow-y-auto space-y-2 pr-1">
+          <p class="text-xs text-slate-500 italic text-center py-8">No spin history recorded yet!</p>
+        </div>
+      </div>
+
+      <!-- Tab Content: Style Customization -->
+      <div id="tabContent-style" class="hidden flex-grow p-4 overflow-y-auto space-y-4 text-xs">
+        <div>
+          <label class="block text-slate-300 font-bold mb-1">Color Theme Palette</label>
+          <select id="themeSelect" onchange="updateStyleSettings()" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-slate-200 font-semibold focus:outline-none focus:border-purple-500">
+            <option value="neon">Neon Vibrant (Default)</option>
+            <option value="gold">Golden Trophy Luxury</option>
+            <option value="pastel">Pastel Cute</option>
+            <option value="cyberpunk">Cyberpunk Yellow & Teal</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-bold mb-1">Spin Duration (<span id="durationVal">5</span>s)</label>
+          <input type="range" id="durationRange" min="2" max="12" step="1" value="5" oninput="document.getElementById('durationVal').innerText = this.value; updateStyleSettings()" class="w-full accent-purple-500">
+        </div>
+
+        <div class="space-y-2 pt-2 border-t border-slate-800">
+          <label class="flex items-center justify-between cursor-pointer">
+            <span class="text-slate-300 font-semibold">Auto-remove winning segment</span>
+            <input type="checkbox" id="autoRemoveToggle" onchange="updateStyleSettings()" class="w-4 h-4 accent-purple-500 rounded">
+          </label>
+          <label class="flex items-center justify-between cursor-pointer">
+            <span class="text-slate-300 font-semibold">Show Winner Popup Modal</span>
+            <input type="checkbox" id="showModalToggle" checked onchange="updateStyleSettings()" class="w-4 h-4 accent-purple-500 rounded">
+          </label>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- OBS Link Generator Modal -->
+  <div id="obsLinkModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-all duration-300">
+    <div class="bg-slate-900 border border-purple-500/50 rounded-3xl p-6 max-w-xl w-full relative transform scale-95 transition-all duration-300 shadow-2xl">
+      
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-camera text-purple-400 text-xl"></i>
+          <h2 class="text-lg font-bold text-white">OBS Browser Source Link</h2>
+        </div>
+        <button onclick="closeLinkModal()" class="text-slate-400 hover:text-white p-1">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-400 mb-4">Copy this URL and paste it into OBS as a <strong class="text-purple-300">Browser Source</strong> (1920x1080). It includes your current wheel items and settings automatically!</p>
+
+      <div class="bg-slate-950 border border-slate-800 rounded-xl p-3 mb-4 flex items-center justify-between gap-2">
+        <input type="text" id="obsGeneratedUrl" readonly class="bg-transparent text-xs text-purple-300 font-mono flex-grow outline-none truncate">
+        <button onclick="copyOBSLink()" id="copyObsBtn" class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-copy"></i> Copy
+        </button>
+      </div>
+
+      <div class="space-y-2 text-xs text-slate-400 bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
+        <p class="font-bold text-slate-200"><i class="fa-solid fa-circle-info text-purple-400 mr-1"></i> Quick OBS Setup:</p>
+        <ol class="list-decimal list-inside space-y-1">
+          <li>In OBS, click <strong class="text-slate-300">+ Add Source</strong> &rarr; <strong class="text-slate-300">Browser</strong>.</li>
+          <li>Paste the copied URL in the <strong class="text-slate-300">URL</strong> field.</li>
+          <li>Set Width: <strong class="text-slate-300">1920</strong> and Height: <strong class="text-slate-300">1080</strong>.</li>
+          <li>Check <strong class="text-slate-300">"Shutdown source when not visible"</strong>.</li>
+        </ol>
+      </div>
+
+      <div class="mt-5 flex justify-end">
+        <button onclick="closeLinkModal()" class="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Winner Modal -->
+  <div id="winnerModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-all duration-300">
+    <div class="bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-8 max-w-md w-full text-center glow-gold relative transform scale-95 transition-all duration-300" id="winnerModalCard">
+      
+      <div class="w-20 h-20 bg-gradient-to-tr from-amber-400 to-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-950 text-3xl shadow-lg shadow-amber-500/50 animate-bounce">
+        <i class="fa-solid fa-trophy"></i>
+      </div>
+
+      <span class="text-xs font-900 tracking-widest text-amber-400 uppercase">WE HAVE A WINNER!</span>
+      
+      <h2 id="winnerTitle" class="text-3xl font-900 font-heading text-white my-3 break-words animate-winner">
+        SAMPLE WINNER
+      </h2>
+
+      <p id="winnerSubtext" class="text-xs text-slate-400 mb-6">Selected by random spin sequence</p>
+
+      <div class="flex gap-3 justify-center">
+        <button onclick="closeWinnerModal()" class="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-900 text-sm shadow-lg shadow-amber-500/30 transition active:scale-95">
+          CONTINUE
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer id="mainFooter" class="bg-slate-950 border-t border-slate-800/80 py-3 px-4 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
+      <p>Tip: Add this URL to an OBS <strong class="text-slate-300">Browser Source</strong> (1920x1080) for stream overlays!</p>
+      <div class="flex items-center gap-4">
+        <span>Press <kbd class="bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded text-slate-300 font-mono">Space</kbd> to Spin</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    /* ==================== STATE MANAGEMENT ==================== */
+    let items = [
+      { id: 1, text: 'Valorant', color: '#a855f7', weight: 1 },
+      { id: 2, text: 'Apex Legends', color: '#ec4899', weight: 1 },
+      { id: 3, text: 'GTA V', color: '#3b82f6', weight: 1 },
+      { id: 4, text: 'Minecraft', color: '#10b981', weight: 1 },
+      { id: 5, text: 'Fortnite', color: '#f59e0b', weight: 1 },
+      { id: 6, text: 'Overwatch 2', color: '#6366f1', weight: 1 }
+    ];
+
+    let spinHistory = [];
+    let isSpinning = false;
+    let currentAngle = 0; // In Radians
+    let audioEnabled = true;
+    let obsMode = false;
+
+    let config = {
+      theme: 'neon',
+      duration: 5,
+      autoRemove: false,
+      showModal: true
+    };
+
+    let twitchClient = null;
+    let isTwitchConnected = false;
+    let lastSpinTime = 0;
+
+    let twitchConfig = {
+      channel: '',
+      command: '!spin',
+      perms: 'everyone',
+      cooldown: 10
+    };
+
+    const colorPalettes = {
+      neon: ['#a855f7', '#ec4899', '#3b82f6', '#10b981', '#f59e0b', '#6366f1', '#f43f5e', '#06b6d4'],
+      gold: ['#f59e0b', '#d97706', '#b45309', '#fbbf24', '#78350f', '#fef08a'],
+      pastel: ['#f472b6', '#38bdf8', '#4ade80', '#facc15', '#c084fc', '#fb923c'],
+      cyberpunk: ['#facc15', '#06b6d4', '#f43f5e', '#a855f7', '#10b981']
+    };
+
+    /* ==================== AUDIO SYNTHESIZER (WEB AUDIO API) ==================== */
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+
+    function initAudio() {
+      if (!audioCtx) audioCtx = new AudioContext();
+    }
+
+    function playTickSound() {
+      if (!audioEnabled) return;
+      initAudio();
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(120, audioCtx.currentTime + 0.04);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.04);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.04);
+      } catch (e) {}
+    }
+
+    function playVictorySound() {
+      if (!audioEnabled) return;
+      initAudio();
+      try {
+        const notes = [261.63, 329.63, 392.00, 523.25];
+        notes.forEach((freq, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0, audioCtx.currentTime + idx * 0.1);
+          gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + idx * 0.1 + 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + idx * 0.1 + 0.4);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(audioCtx.currentTime + idx * 0.1);
+          osc.stop(audioCtx.currentTime + idx * 0.1 + 0.4);
+        });
+      } catch (e) {}
+    }
+
+    /* ==================== CANVAS WHEEL DRAWING ==================== */
+    function drawWheel() {
+      const canvas = document.getElementById('wheelCanvas');
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const radius = width / 2 - 15;
+
+      ctx.clearRect(0, 0, width, height);
+
+      if (items.length === 0) {
+        ctx.fillStyle = '#334155';
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 16px Poppins';
+        ctx.textAlign = 'center';
+        ctx.fillText('Add items to start!', centerX, centerY);
+        return;
+      }
+
+      const sliceAngle = (Math.PI * 2) / items.length;
+
+      items.forEach((item, index) => {
+        const startAngle = currentAngle + index * sliceAngle;
+        const endAngle = startAngle + sliceAngle;
+
+        // Draw Slice Segment
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+        ctx.closePath();
+
+        ctx.fillStyle = item.color;
+        ctx.fill();
+
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Draw Text inside slice
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(startAngle + sliceAngle / 2);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px Poppins';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+        ctx.shadowBlur = 4;
+
+        // Truncate long text
+        let displayText = item.text;
+        if (displayText.length > 18) displayText = displayText.substring(0, 15) + '...';
+
+        ctx.fillText(displayText, radius - 25, 5);
+        ctx.restore();
+      });
+
+      // Outer Ring
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = config.theme === 'gold' ? '#f59e0b' : '#a855f7';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+    }
+
+    /* ==================== SPIN ANIMATION PHYSICS ==================== */
+    let lastSegmentIndex = -1;
+
+    function spinWheel() {
+      if (isSpinning || items.length === 0) return;
+
+      isSpinning = true;
+      document.getElementById('centerSpinBtn').disabled = true;
+
+      // Calculate random spin rotation (full rotations + target offset)
+      const totalRotations = (Math.floor(Math.random() * 5) + 5) * Math.PI * 2;
+      const randomOffset = Math.random() * Math.PI * 2;
+      const targetAngle = currentAngle + totalRotations + randomOffset;
+      const duration = config.duration * 1000;
+      const startTime = performance.now();
+
+      const startAngle = currentAngle;
+
+      function animateSpin(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Ease Out Cubic physics formula
+        const easeOut = 1 - Math.pow(1 - progress, 3);
+        currentAngle = startAngle + (targetAngle - startAngle) * easeOut;
+
+        drawWheel();
+
+        // Calculate currently pointing segment for tick audio
+        const sliceAngle = (Math.PI * 2) / items.length;
+        const normalizedAngle = (Math.PI * 2.5 - (currentAngle % (Math.PI * 2))) % (Math.PI * 2);
+        const currentSegment = Math.floor(normalizedAngle / sliceAngle) % items.length;
+
+        if (currentSegment !== lastSegmentIndex) {
+          lastSegmentIndex = currentSegment;
+          playTickSound();
+          
+          const arrow = document.getElementById('pointerArrow');
+          arrow.classList.remove('ticking');
+          void arrow.offsetWidth; // Force reflow
+          arrow.classList.add('ticking');
+        }
+
+        if (progress < 1) {
+          requestAnimationFrame(animateSpin);
+        } else {
+          isSpinning = false;
+          document.getElementById('centerSpinBtn').disabled = false;
+          onSpinComplete(currentSegment);
+        }
+      }
+
+      requestAnimationFrame(animateSpin);
+    }
+
+    function onSpinComplete(winningIndex) {
+      const winner = items[winningIndex];
+      if (!winner) return;
+
+      playVictorySound();
+      launchConfetti();
+
+      // Update Embedded Box
+      document.getElementById('embeddedWinnerBox').innerHTML = `
+        <span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest block">WINNER</span>
+        <span class="text-base font-900 text-amber-400 font-heading">${winner.text}</span>
+      `;
+
+      // Record to history
+      const now = new Date();
+      spinHistory.unshift({
+        text: winner.text,
+        time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+      renderHistory();
+
+      // Trigger Winner Modal popup if enabled
+      if (config.showModal) {
+        openWinnerModal(winner.text);
+      }
+
+      // Auto-remove winning segment if toggled
+      if (config.autoRemove) {
+        setTimeout(() => {
+          items = items.filter(i => i.id !== winner.id);
+          renderItems();
+          drawWheel();
+        }, 1500);
+      }
+    }
+
+    /* ==================== TWITCH CHAT INTEGRATION ==================== */
+    function toggleTwitchConnect() {
+      const channelInput = document.getElementById('twitchChannelInput');
+      const channelName = channelInput.value.trim().toLowerCase();
+
+      if (!channelName) {
+        alert('Please enter a Twitch channel name.');
+        return;
+      }
+
+      if (isTwitchConnected) {
+        disconnectTwitch();
+      } else {
+        connectTwitch(channelName);
+      }
+    }
+
+    function connectTwitch(channel) {
+      if (typeof tmi === 'undefined') {
+        alert('Twitch Chat Library failed to load. Please check your internet connection.');
+        return;
+      }
+
+      twitchConfig.channel = channel;
+      twitchClient = new tmi.Client({
+        options: { debug: false },
+        channels: [channel]
+      });
+
+      twitchClient.connect().then(() => {
+        isTwitchConnected = true;
+        updateTwitchUI(true);
+      }).catch((err) => {
+        console.error('Twitch connection error:', err);
+        alert(`Failed to connect to Twitch channel: ${channel}`);
+        updateTwitchUI(false);
+      });
+
+      twitchClient.on('message', (target, tags, message, self) => {
+        if (self) return;
+
+        const cmd = message.trim().toLowerCase();
+        const targetCmd = twitchConfig.command.toLowerCase();
+
+        if (cmd === targetCmd) {
+          handleChatSpinTrigger(tags);
+        }
+      });
+    }
+
+    function disconnectTwitch() {
+      if (twitchClient) {
+        twitchClient.disconnect();
+        twitchClient = null;
+      }
+      isTwitchConnected = false;
+      updateTwitchUI(false);
+    }
+
+    function handleChatSpinTrigger(tags) {
+      const now = Date.now();
+      if ((now - lastSpinTime) / 1000 < twitchConfig.cooldown) {
+        return; // Ignore command on cooldown
+      }
+
+      // Permissions check
+      if (twitchConfig.perms === 'subs') {
+        const isSub = tags.subscriber || tags.vip || tags.mod || tags.badges?.broadcaster;
+        if (!isSub) return;
+      } else if (twitchConfig.perms === 'mods') {
+        const isMod = tags.mod || tags.badges?.broadcaster;
+        if (!isMod) return;
+      }
+
+      if (!isSpinning) {
+        lastSpinTime = now;
+        spinWheel();
+      }
+    }
+
+    function updateTwitchUI(connected) {
+      const statusText = document.getElementById('twitchStatusText');
+      const badge = document.getElementById('twitchBadge');
+      const btn = document.getElementById('connectTwitchBtn');
+
+      if (connected) {
+        statusText.innerText = `Connected (${twitchConfig.channel})`;
+        statusText.className = 'text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800';
+        badge.className = 'absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-slate-900';
+        btn.innerText = 'Disconnect';
+        btn.className = 'bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl transition flex items-center gap-1';
+      } else {
+        statusText.innerText = 'Disconnected';
+        statusText.className = 'text-[10px] bg-rose-950 text-rose-300 px-2 py-0.5 rounded border border-rose-800';
+        badge.className = 'absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-slate-900';
+        btn.innerText = 'Connect';
+        btn.className = 'bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded-xl transition flex items-center gap-1';
+      }
+    }
+
+    function updateTwitchConfig() {
+      twitchConfig.command = document.getElementById('chatCommandInput').value.trim() || '!spin';
+      twitchConfig.perms = document.getElementById('twitchPermsSelect').value;
+      twitchConfig.cooldown = parseInt(document.getElementById('cooldownRange').value);
+    }
+
+    /* ==================== OBS URL GENERATOR ==================== */
+    function generateOBSLink() {
+      const baseUrl = window.location.href.split('?')[0];
+      const params = new URLSearchParams();
+      params.set('obs', '1');
+      params.set('theme', config.theme);
+      params.set('duration', config.duration);
+      params.set('autoRemove', config.autoRemove ? '1' : '0');
+      
+      if (twitchConfig.channel) {
+        params.set('channel', twitchConfig.channel);
+        params.set('cmd', twitchConfig.command);
+      }
+
+      const compactItems = items.map(i => ({ t: i.text, c: i.color }));
+      params.set('items', encodeURIComponent(JSON.stringify(compactItems)));
+
+      return `${baseUrl}?${params.toString()}`;
+    }
+
+    function openLinkModal() {
+      const modal = document.getElementById('obsLinkModal');
+      const urlInput = document.getElementById('obsGeneratedUrl');
+      urlInput.value = generateOBSLink();
+      modal.classList.remove('opacity-0', 'pointer-events-none');
+    }
+
+    function closeLinkModal() {
+      const modal = document.getElementById('obsLinkModal');
+      modal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    function copyOBSLink() {
+      const urlInput = document.getElementById('obsGeneratedUrl');
+      urlInput.select();
+      document.execCommand('copy');
+
+      const btn = document.getElementById('copyObsBtn');
+      btn.innerHTML = `<i class="fa-solid fa-check"></i> Copied!`;
+      btn.classList.replace('bg-purple-600', 'bg-emerald-600');
+
+      setTimeout(() => {
+        btn.innerHTML = `<i class="fa-solid fa-copy"></i> Copy`;
+        btn.classList.replace('bg-emerald-600', 'bg-purple-600');
+      }, 2000);
+    }
+
+    /* ==================== SWITCH TABS ==================== */
+    function switchTab(tabName) {
+      ['items', 'twitch', 'presets', 'history', 'style'].forEach(t => {
+        const content = document.getElementById(`tabContent-${t}`);
+        if (content) content.classList.add('hidden');
+        const btn = document.getElementById(`tabBtn-${t}`);
+        if (btn) {
+          btn.classList.remove('border-purple-500', 'text-purple-400');
+          btn.classList.add('border-transparent', 'text-slate-400');
+        }
+      });
+
+      const activeContent = document.getElementById(`tabContent-${tabName}`);
+      if (activeContent) activeContent.classList.remove('hidden');
+      
+      const activeBtn = document.getElementById(`tabBtn-${tabName}`);
+      if (activeBtn) {
+        activeBtn.classList.remove('border-transparent', 'text-slate-400');
+        activeBtn.classList.add('border-purple-500', 'text-purple-400');
+      }
+    }
+
+    /* ==================== ITEMS MANAGEMENT ==================== */
+    function renderItems() {
+      const container = document.getElementById('itemsListContainer');
+      container.innerHTML = '';
+
+      document.getElementById('segmentCountText').innerText = `${items.length} Segments`;
+
+      items.forEach((item) => {
+        const el = document.createElement('div');
+        el.className = 'flex items-center gap-2 bg-slate-950/60 p-2 rounded-xl border border-slate-800 text-xs hover:border-slate-700 transition';
+        el.innerHTML = `
+          <input type="color" value="${item.color}" onchange="updateItemColor(${item.id}, this.value)" class="w-6 h-6 rounded cursor-pointer border-0 bg-transparent">
+          <input type="text" value="${item.text}" onchange="updateItemText(${item.id}, this.value)" class="flex-grow bg-transparent text-slate-200 font-medium focus:outline-none focus:border-b focus:border-purple-500">
+          <button onclick="deleteItem(${item.id})" class="text-slate-500 hover:text-rose-400 px-1.5 py-1">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        `;
+        container.appendChild(el);
+      });
+    }
+
+    function handleAddItem(e) {
+      e.preventDefault();
+      const input = document.getElementById('newItemInput');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const palette = colorPalettes[config.theme] || colorPalettes.neon;
+      const color = palette[items.length % palette.length];
+
+      items.push({
+        id: Date.now(),
+        text: text,
+        color: color,
+        weight: 1
+      });
+
+      input.value = '';
+      renderItems();
+      drawWheel();
+    }
+
+    function updateItemColor(id, color) {
+      const item = items.find(i => i.id === id);
+      if (item) {
+        item.color = color;
+        drawWheel();
+      }
+    }
+
+    function updateItemText(id, text) {
+      const item = items.find(i => i.id === id);
+      if (item) {
+        item.text = text;
+        drawWheel();
+      }
+    }
+
+    function deleteItem(id) {
+      items = items.filter(i => i.id !== id);
+      renderItems();
+      drawWheel();
+    }
+
+    function shuffleSegments() {
+      for (let i = items.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [items[i], items[j]] = [items[j], items[i]];
+      }
+      renderItems();
+      drawWheel();
+    }
+
+    function clearAllItems() {
+      items = [];
+      renderItems();
+      drawWheel();
+    }
+
+    /* ==================== PRESETS LIBRARY ==================== */
+    const presets = {
+      games: ['Valorant', 'Apex Legends', 'GTA V', 'Minecraft', 'Fortnite', 'Overwatch 2'],
+      subgoals: ['Hydrate Streamer', 'Sing 10s', 'VIP Pass', 'No Cursing 5m', 'Chat Pick Emote'],
+      challenges: ['Play Inverted', 'Hot Sauce Shot', 'Pistol Only', 'Mute Discord 3m', 'Emote Only Chat'],
+      giveaway: ['GamerTag_99', 'PixelQueen', 'StreamFanatic', 'SubZero88', 'NightOwl']
+    };
+
+    function loadPreset(key) {
+      if (!presets[key]) return;
+      const palette = colorPalettes[config.theme] || colorPalettes.neon;
+      
+      items = presets[key].map((text, idx) => ({
+        id: Date.now() + idx,
+        text: text,
+        color: palette[idx % palette.length],
+        weight: 1
+      }));
+
+      switchTab('items');
+      renderItems();
+      drawWheel();
+    }
+
+    /* ==================== UI & OBS OVERLAY CONTROLS ==================== */
+    function toggleOBSMode() {
+      obsMode = !obsMode;
+      document.body.classList.toggle('obs-mode', obsMode);
+      
+      const header = document.getElementById('mainHeader');
+      const footer = document.getElementById('mainFooter');
+      const configPanel = document.getElementById('configPanelSection');
+      const wheelControls = document.getElementById('wheelControlsBar');
+      const obsBtnText = document.getElementById('obsModeText');
+
+      if (obsMode) {
+        header.classList.add('hidden');
+        footer.classList.add('hidden');
+        configPanel.classList.add('hidden');
+        wheelControls.classList.add('opacity-0', 'hover:opacity-100');
+        obsBtnText.innerText = 'Exit OBS Mode';
+      } else {
+        header.classList.remove('hidden');
+        footer.classList.remove('hidden');
+        configPanel.classList.remove('hidden');
+        wheelControls.classList.remove('opacity-0', 'hover:opacity-100');
+        obsBtnText.innerText = 'OBS Overlay Mode';
+      }
+    }
+
+    function updateStyleSettings() {
+      config.theme = document.getElementById('themeSelect').value;
+      config.duration = parseInt(document.getElementById('durationRange').value);
+      config.autoRemove = document.getElementById('autoRemoveToggle').checked;
+      config.showModal = document.getElementById('showModalToggle').checked;
+
+      const ring = document.getElementById('wheelGlowRing');
+      if (config.theme === 'gold') {
+        ring.className = 'absolute rounded-full border-4 border-amber-500/50 glow-gold transition-all duration-500';
+      } else {
+        ring.className = 'absolute rounded-full border-4 border-purple-500/40 glow-purple transition-all duration-500';
+      }
+
+      drawWheel();
+    }
+
+    function renderHistory() {
+      const container = document.getElementById('historyList');
+      if (spinHistory.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-500 italic text-center py-8">No spin history recorded yet!</p>`;
+        return;
+      }
+
+      container.innerHTML = spinHistory.map(h => `
+        <div class="flex items-center justify-between bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs">
+          <span class="font-bold text-amber-400">${h.text}</span>
+          <span class="text-slate-500 text-[10px]">${h.time}</span>
+        </div>
+      `).join('');
+    }
+
+    function clearHistory() {
+      spinHistory = [];
+      renderHistory();
+    }
+
+    function toggleAudio() {
+      audioEnabled = !audioEnabled;
+      const icon = document.getElementById('audioIcon');
+      if (audioEnabled) {
+        icon.className = 'fa-solid fa-volume-high text-emerald-400';
+      } else {
+        icon.className = 'fa-solid fa-volume-xmark text-rose-400';
+      }
+    }
+
+    function resetWheel() {
+      currentAngle = 0;
+      document.getElementById('embeddedWinnerBox').innerHTML = `<p class="text-xs text-slate-400 font-medium">Ready to spin!</p>`;
+      drawWheel();
+    }
+
+    function openWinnerModal(winnerText) {
+      const modal = document.getElementById('winnerModal');
+      const title = document.getElementById('winnerTitle');
+      title.innerText = winnerText;
+      modal.classList.remove('opacity-0', 'pointer-events-none');
+    }
+
+    function closeWinnerModal() {
+      const modal = document.getElementById('winnerModal');
+      modal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    /* ==================== CONFETTI ANIMATION ==================== */
+    const confettiCanvas = document.getElementById('confettiCanvas');
+    const confettiCtx = confettiCanvas.getContext('2d');
+    let confettiParticles = [];
+
+    function resizeConfetti() {
+      confettiCanvas.width = window.innerWidth;
+      confettiCanvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeConfetti);
+    resizeConfetti();
+
+    function launchConfetti() {
+      confettiParticles = [];
+      const colors = ['#f59e0b', '#ec4899', '#8b5cf6', '#10b981', '#3b82f6'];
+      for (let i = 0; i < 90; i++) {
+        confettiParticles.push({
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2,
+          vx: (Math.random() - 0.5) * 16,
+          vy: (Math.random() - 0.7) * 16,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          size: Math.random() * 8 + 4,
+          gravity: 0.25,
+          life: 1
+        });
+      }
+      animateConfetti();
+    }
+
+    function animateConfetti() {
+      confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+      confettiParticles.forEach((p, idx) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += p.gravity;
+        p.life -= 0.015;
+
+        confettiCtx.fillStyle = p.color;
+        confettiCtx.globalAlpha = Math.max(0, p.life);
+        confettiCtx.beginPath();
+        confettiCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        confettiCtx.fill();
+
+        if (p.life <= 0) confettiParticles.splice(idx, 1);
+      });
+
+      if (confettiParticles.length > 0) {
+        requestAnimationFrame(animateConfetti);
+      }
+    }
+
+    /* ==================== KEYBOARD HOTKEYS ==================== */
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+        e.preventDefault();
+        spinWheel();
+      }
+    });
+
+    /* ==================== APPLICATION INITIALIZATION ==================== */
+    window.onload = function() {
+      const urlParams = new URLSearchParams(window.location.search);
+
+      // Parse custom wheel items from URL
+      if (urlParams.get('items')) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(urlParams.get('items')));
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            items = parsed.map((item, idx) => ({
+              id: Date.now() + idx,
+              text: item.t,
+              color: item.c,
+              weight: 1
+            }));
+          }
+        } catch (e) { console.error('Failed to parse wheel items from URL:', e); }
+      }
+
+      // Parse style settings from URL
+      if (urlParams.get('theme')) {
+        config.theme = urlParams.get('theme');
+        const themeSelect = document.getElementById('themeSelect');
+        if (themeSelect) themeSelect.value = config.theme;
+      }
+
+      if (urlParams.get('duration')) {
+        config.duration = parseInt(urlParams.get('duration'));
+        const durationRange = document.getElementById('durationRange');
+        if (durationRange) durationRange.value = config.duration;
+      }
+
+      if (urlParams.get('autoRemove')) {
+        config.autoRemove = urlParams.get('autoRemove') === '1';
+        const autoRemoveToggle = document.getElementById('autoRemoveToggle');
+        if (autoRemoveToggle) autoRemoveToggle.checked = config.autoRemove;
+      }
+
+      // Auto-connect Twitch channel if provided in URL
+      if (urlParams.get('channel')) {
+        const channel = urlParams.get('channel');
+        document.getElementById('twitchChannelInput').value = channel;
+        if (urlParams.get('cmd')) {
+          twitchConfig.command = urlParams.get('cmd');
+          document.getElementById('chatCommandInput').value = twitchConfig.command;
+        }
+        connectTwitch(channel);
+      }
+
+      renderItems();
+      updateStyleSettings();
+
+      // Check OBS mode parameter
+      if (urlParams.get('obs') === '1') {
+        toggleOBSMode();
+      }
+    };
+  </script>
+</body>
+</html>
